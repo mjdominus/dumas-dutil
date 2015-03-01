@@ -1,0 +1,10 @@
+#!/bin/sh
+
+cp /dev/null glyphs.html
+for i in ??.pbm; do
+  j=$(suf $i png)
+  echo $i; pnmscale 8 $i | pnmtopng  > $j
+  echo "<p><img src='$j'> $j</p>" >> glyphs.html
+done
+
+
