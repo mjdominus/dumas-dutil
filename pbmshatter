@@ -1,9 +1,20 @@
 #!/usr/bin/perl
 # -*- cperl -*-
+#
+# Find connected regions of black pixels in a PBM file
+# write the glyphs found to separate files
+#
+# Usage: pbmshatter input.pbm
+#
+# Output is written to files named aa.pbm, ab.pbm, ac.pbm, ...
 
+use lib '/home/mjd/src/dumas-dutil';
 use strict;
 use Image::PPM;
 use Digest::MD5 qw(md5_hex);
+
+my @dirname = qw(right down left up);
+my @rowname = qw(column row column row);
 
 my ($file) = @ARGV;
 defined($file) or die "Usage: $0 filename\n";
@@ -14,9 +25,9 @@ my %seen;
 my %hash;
 my $outfile = "aa";
 my ($Y, $X) = ($pbm->rows, $pbm->cols);
-for (my $y = 0; $y < $Y; $y ++) {
+for (my $y = 1; $y < $Y-1; $y ++) {
  PIXEL:
-  for (my $x = 0; $x < $X; $x ++) {
+  for (my $x = 1; $x < $X-1; $x ++) {
     next PIXEL if $seen{$y}{$x};
     next PIXEL unless $pbm->get($y, $x); # black only
 
@@ -49,7 +60,24 @@ for (my $y = 0; $y < $Y; $y ++) {
   }
 }
 
-sub find_bb_from {
+# This was my first try, but it fails to recognize certain glyphs.
+# For example, in
+#
+#
+#    * ***
+#    *    
+#    ***
+#    *    
+#    ***
+#    *    
+#    ***
+#
+# the disconnected dash in the upper left is truncated.
+# This is because we do a flood fill starting at the upper left,
+# which gets the main component, and then we extract the smallest box
+# containing that component
+#
+sub find_bb_from__broken {
   my ($pbm, $y, $x, $seen) = @_;
   my ($yM, $xM) = ($y, $x); # BR corner of bounding box
   my ($ym, $xm) = ($y, $x); # TL corner of bounding box
@@ -84,4 +112,74 @@ sub black_adjacent_pixels {
     }
   }
   return @b;
+}
+
+
+# Guess a small bounding box; make it wider until the right-hand
+# edge no longer contains a black pixel.
+# Then make it taller until the bottom edge no longer contains a black
+# pixel.  If at any point *neither* edge contains a, black pixel,
+# we win; otherwise, make it wider again, etc.
+#
+# This didn't work; you need to expand the BB in *all four*
+# directions to recognize glyphs like "0"
+# I started hacking a version that did that, but stopped work on it
+sub find_bb_from__broken2 {
+  my ($pbm, $y, $x, $seen) = @_;
+  warn "Finding bounding box starting from row $y column $x\n";
+  my ($yM, $xM) = ($y, $x); # BR corner of bounding box
+  my ($ym, $xm) = ($y, $x); # TL corner of bounding box
+
+  my $dir = 0;
+  my @found = (0,0,0,0); # have we found a blank row/column
+                         # in each direction?
+
+  while (grep {$_==0} @found) {
+    my $dir = grep { $found[$_] == 0 } (0,1,2,3);
+    warn "dir=$dir: Expanding box $dirname[$dir]ward\n";
+    if    ($dir == 0) { $xM++ }
+    elsif ($dir == 1) { $yM++ }
+    elsif ($dir == 2) { $xm-- }
+    elsif ($dir == 3) { $ym-- }
+    else {die}
+
+    if (line_clear($pbm, $ym, $xm, $yM, $xM, $dir)) {
+      $found[$dir] = 1;
+    } else {
+      if ($dir % 2 == 0) {
+        $found[$_] = 0 for 1,3;
+      } else {
+        $found[$_] = 0 for 0,2;
+      }
+    }
+  }
+
+  for my $r ($ym .. $yM) {
+    for my $c ($xm .. $xM) {
+      $seen->{$r}{$c} = 1;
+    }
+  }
+
+  return ($ym, $xm, $yM-1, $xM-1);
+}
+
+# ($xm, $ym) and ($xM, $yM) are the UL and LR corners of a rectangle.
+# is the right edge (if $dir=0) or the bottom edge (if $dir=1)
+# clear of black pixels?
+sub line_clear {
+  my ($pbm, $ym, $xm, $yM, $xM, $dir) = @_;
+  my @c = ($ym, $xm);
+  my @C = ($yM, $xM);
+  my @cc = @C;
+  my $dirname = $dir ? "vertical" : "horizontal";
+  if ($dir == 0) {
+    warn "Checking column $xM (=$xm?) from row $ym to row $yM\n";
+  } else {
+    warn "Checking row $yM (=$ym?) from column $xm to column $xM\n";
+  }
+  for my $i ($c[$dir] .. $C[$dir]) {
+    $cc[$dir] = $i;
+    if ($pbm->get(@cc)) { return } # black pixel
+  }
+  return 1;
 }
