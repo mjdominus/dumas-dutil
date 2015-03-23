@@ -1,0 +1,5 @@
+#!/bin/bash
+
+for i in *.pbm; do
+  pnmscale 8 $i | pnmtopng > $(suf $i png)
+done
