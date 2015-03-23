@@ -13,11 +13,9 @@ use strict;
 use Image::PPM;
 use Digest::MD5 qw(md5_hex);
 
-my @dirname = qw(right down left up);
-my @rowname = qw(column row column row);
+@ARGV or die "Usage: $0 filenames...\n";
 
 my ($file) = @ARGV;
-defined($file) or die "Usage: $0 filename\n";
 open my($F), "<", $file or die "$file: $!";
 my $pbm = Image::PPM->new_pbm_from_fh($F) or die;
 
@@ -29,9 +27,14 @@ for (my $y = 1; $y < $Y-1; $y ++) {
  PIXEL:
   for (my $x = 1; $x < $X-1; $x ++) {
     next PIXEL if $seen{$y}{$x};
-    next PIXEL unless $pbm->get($y, $x); # black only
+    next PIXEL unless $pbm->get($y, $x) == 0; # white only
 
-    my ($ymin, $xmin, $ymax, $xmax) = find_bb_from($pbm, $y, $x, \%seen);
+    unless (good_window($pbm, $x, $y, 7, 9, \%seen)) {
+      next PIXEL;
+    }
+
+    my ($ymin, $xmin, $ymax, $xmax) = ($y+1, $x+1, $y+7, $x+5);
+
     my ($h, $w) = ($ymax - $ymin + 1, $xmax - $xmin + 1);
     warn "Found $h by $w glyph at ($ymin, $xmin)\n";
     if ($w * $h > 100) {
@@ -115,6 +118,27 @@ sub black_adjacent_pixels {
 }
 
 
+# Take a window and scan over the image.
+# If the entire border of the window is white,
+# snapshot what is the region inside
+sub good_window {
+  my ($pbm, $lt, $tp, $w, $h, $seen) = @_;
+  for my $c ($lt .. $lt+$w-1) {
+    return if $pbm->get($tp, $c) || $pbm->get($tp+$h-1, $c);
+  }
+  for my $r ($tp .. $tp+$h-1) {
+    return if $pbm->get($r, $lt) || $pbm->get($r, $lt+$w-1);
+  }
+
+  for my $c ($lt+1 .. $lt+$w-2) {
+    for my $r ($tp+1 .. $tp+$h-2) {
+      $seen->{$r}{$c} = 1;
+    }
+  }
+
+  return 1;
+}
+
 # Guess a small bounding box; make it wider until the right-hand
 # edge no longer contains a black pixel.
 # Then make it taller until the bottom edge no longer contains a black
@@ -136,7 +160,6 @@ sub find_bb_from__broken2 {
 
   while (grep {$_==0} @found) {
     my $dir = grep { $found[$_] == 0 } (0,1,2,3);
-    warn "dir=$dir: Expanding box $dirname[$dir]ward\n";
     if    ($dir == 0) { $xM++ }
     elsif ($dir == 1) { $yM++ }
     elsif ($dir == 2) { $xm-- }
